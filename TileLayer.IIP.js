@@ -418,6 +418,7 @@ L.TileLayer.IIP = L.TileLayer.extend({
 				tile.style.imageRendering = '-webkit-optimize-contrast';
 			}
 
+			tile.galleryimg = 'no';
 
 			var zoom = this._map.getZoom() + this.options.zoomOffset;
 			if (tilePoint.x !== this.iipGridSize[zoom].x - 1) {
@@ -428,7 +429,14 @@ L.TileLayer.IIP = L.TileLayer.extend({
 				tile.style.height = this._getTileSize() + 'px';
 			}
 
-			tile.galleryimg = 'no';
+			// Special treatment for the lower right corner tile
+			if (tilePoint.x === this.iipGridSize[zoom].x - 1 &&
+				tilePoint.y === this.iipGridSize[zoom].y - 1) {
+				var width = (this.iipImageSize[this.iipMaxZoom].x % this.iipTileSize.x) * Math.pow(2, zoom - this.iipMaxZoom);
+				var height = (this.iipImageSize[this.iipMaxZoom].y % this.iipTileSize.y) * Math.pow(2, zoom - this.iipMaxZoom);
+				tile.style.width = (width || this._getTileSize()) + 'px';
+				tile.style.height = (height || this._getTileSize()) + 'px';	
+			}
 		}
 
 		tile.onselectstart = L.Util.falseFn;
