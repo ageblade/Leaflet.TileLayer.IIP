@@ -1,9 +1,9 @@
 Leaflet.TileLayer.IIP
 ===================
-This plugin adds [IIP][] layering support to the [Leaflet][] library.
+This plugin adds [IIP][] 0.9.9 layering support to the [Leaflet][] library.
 
 ### Requirements
-* Leaflet 0.8 or newer
+* Leaflet 0.7.3
 
 ### Demo
 See [demo][]
@@ -41,7 +41,7 @@ Note: `L.tileLayer.iip` is equivalent to `new L.TileLayer.IIP`
 * `mix`: Switch on multi-channel mixing. Default is `false`.
 * `mixingMatrix`: 2D array containing the mixing matrix. Default is `[[1,0,0],[0,1,0],[0,0,1]]`.
 * `channelLabels`: Array of strings containing the channel labels. Default is `['Channel #1', 'Channel #2', ...]`
-* `minMaxValues`: 2D array of min and max values for each channel. Default is the set of values returned as Min-Max-sample-values by IIPImage (which correspond to the values stored as TIFF SMinSampleValue and SMaxSampleValue tags).
+* (Removed as there's no support in IIP < 1.0)~~`minMaxValues`: 2D array of min and max values for each channel. Default is the set of values returned as Min-Max-sample-values by IIPImage (which correspond to the values stored as TIFF SMinSampleValue and SMaxSampleValue tags).~~
 
 [Leaflet]:http://leafletjs.com
 [IIP]:http://iipimage.sourceforge.net

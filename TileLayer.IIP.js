@@ -107,7 +107,7 @@ L.TileLayer.IIP = L.TileLayer.extend({
 		this._requestURI(url +
 			'&obj=IIP,1.0&obj=max-size&obj=tile-size' +
 			'&obj=resolution-number&obj=bits-per-channel' +
-			'&obj=min-max-sample-values&obj=subject',
+			'&obj=subject',
 			'getting IIP metadata',
 			this._parseMetadata, this);
 	},
@@ -173,19 +173,10 @@ L.TileLayer.IIP = L.TileLayer.extend({
 					layer.iipGamma = layer.iipBPP >= 32 ? 2.2 : 1.0;
 				}
 
-				// Pre-computed Min and max pixel values
-				matches = layer._readIIPKey(response, 'Min-Max-sample-values',
-				 '\\s*(.*)');
-				var str = matches[1].split(/\s+/),
-				    nchannel = layer.iipNChannel = (str.length / 2),
-				    mmc = 0;
-				for (var c = 0; c < nchannel; c++) {
-					iipdefault.minValue[c] = parseFloat(str[mmc++]);
-					iipdefault.maxValue[c] = parseFloat(str[mmc++]);
-				}
 
 				// Override min and max pixel values based on user provided options
-				var minmax = options.minMaxValues;
+				var minmax = options.minMaxValues,
+					nchannel = layer.iipNChannel;
 				if (minmax.length) {
 					for (c = 0; c < nchannel; c++) {
 						if (minmax[c] !== undefined) {
@@ -284,42 +275,54 @@ L.TileLayer.IIP = L.TileLayer.extend({
 		zoom = map.getZoom();
 		if (zoom < this.iipMinZoom) {
 			map.setZoom(this.iipMinZoom);
+		} else if (zoom > this.iipMaxZoom) {
+			map.setZoom(this.iipMaxZoom);
 		}
 		L.TileLayer.prototype.addTo.call(this, map);
 	},
 
 	_getTileSizeFac: function () {
 		var	map = this._map,
-			zoom = this._tileZoom,
+			zoom = map.getZoom() + this.options.zoomOffset,
 			zoomN = this.options.maxNativeZoom;
 		return (zoomN && zoom > zoomN) ?
 				Math.round(map.getZoomScale(zoom) / map.getZoomScale(zoomN)) : 1;
 	},
 
-	_isValidTile: function (coords) {
-		var crs = this._map.options.crs;
-
-		if (!crs.infinite) {
-			// don't load tile if it's out of bounds and not wrapped
-			var bounds = this._globalTileRange;
-			if ((!crs.wrapLng && (coords.x < bounds.min.x || coords.x > bounds.max.x)) ||
-			    (!crs.wrapLat && (coords.y < bounds.min.y || coords.y > bounds.max.y))) { return false; }
+	_tileShouldBeLoaded: function (tilePoint) {
+		if ((tilePoint.x + ':' + tilePoint.y) in this._tiles) {
+			return false; // already loaded
 		}
 
-		// don't load tile if it's out of the tile grid
-		var z = this._getZoomForUrl(),
-		    wcoords = coords.clone();
-		this._wrapCoords(wcoords);
-		if (wcoords.x < 0 || wcoords.x >= this.iipGridSize[z].x ||
-			wcoords.y < 0 || wcoords.y >= this.iipGridSize[z].y) {
-			return false;
+		if (!this.options.continuousWorld) {
+			var z = this._getZoomForUrl();
+			var limit = {
+				x: this.iipGridSize[z].x,
+				y: this.iipGridSize[z].y
+			};
+
+			if ((this.options.noWrap && (tilePoint.x < 0 || tilePoint.x >= limit.x)) ||
+				(this.options.noWrap && (tilePoint.y < 0 || tilePoint.y >= limit.y))) { return false; }
 		}
 
-		if (!this.options.bounds) { return true; }
+		if (this.options.bounds) {
+			var tileSize = this.options.tileSize,
+				nwPoint = tilePoint.multiplyBy(tileSize),
+				sePoint = nwPoint.add([tileSize, tileSize]),
+				nw = this._map.unproject(nwPoint),
+				se = this._map.unproject(sePoint);
 
-		// don't load tile if it doesn't intersect the bounds in options
-		var tileBounds = this._tileCoordsToBounds(coords);
-		return L.latLngBounds(this.options.bounds).intersects(tileBounds);
+			// TODO temporary hack, will be removed after refactoring projections
+			// https://github.com/Leaflet/Leaflet/issues/1618
+			if (!options.continuousWorld && !options.noWrap) {
+				nw = nw.wrap();
+				se = se.wrap();
+			}
+
+			if (!options.bounds.intersects([nw, se])) { return false; }
+		}
+
+		return true;
 	},
 
 	getTileUrl: function (coords) {
@@ -369,10 +372,41 @@ L.TileLayer.IIP = L.TileLayer.extend({
 		 (coords.x + this.iipGridSize[z].x * coords.y).toString();
 	},
 
-	_initTile: function (tile) {
-		L.DomUtil.addClass(tile, 'leaflet-tile');
+	_addTile: function (tilePoint, container) {
+		var tilePos = this._getTilePos(tilePoint);
 
-		// Force pixels to be visible at high zoom factos whenever possible
+		// get unused tile - or create a new tile
+		var tile = this._getTile(tilePoint);
+
+		/*
+		 Chrome 20 layouts much faster with top/left (verify with timeline, frames)
+		 Android 4 browser has display issues with top/left and requires transform instead
+		 (other browsers don't currently care) - see debug/hacks/jitter.html for an example
+		 */
+		L.DomUtil.setPosition(tile, tilePos, L.Browser.chrome);
+
+		this._tiles[tilePoint.x + ':' + tilePoint.y] = tile;
+
+		this._loadTile(tile, tilePoint);
+
+		if (tile.parentNode !== this._tileContainer) {
+			container.appendChild(tile);
+		}
+	},
+
+	_getTile: function (tilePoint) {
+		if (this.options.reuseTiles && this._unusedTiles.length > 0) {
+			var tile = this._unusedTiles.pop();
+			this._resetTile(tile);
+			return tile;
+		}
+		return this._createTile(tilePoint);
+	},
+
+	_createTile: function (tilePoint) {
+		var tile = L.DomUtil.create('img', 'leaflet-tile');
+
+		// Force pixels to be visible at high zoom factors whenever possible
 		if (this._getTileSizeFac() > 1) {
 			if (L.Browser.ie) {
 				tile.style.msInterpolationMode = 'nearest-neighbor';
@@ -383,8 +417,18 @@ L.TileLayer.IIP = L.TileLayer.extend({
 			} else {
 				tile.style.imageRendering = '-webkit-optimize-contrast';
 			}
-			tile.style.width = this._tileSize + 'px';
-			tile.style.height = this._tileSize + 'px';
+
+
+			var zoom = this._map.getZoom() + this.options.zoomOffset;
+			if (tilePoint.x !== this.iipGridSize[zoom].x - 1) {
+				tile.style.width = this._getTileSize() + 'px';
+			}
+
+			if (tilePoint.y !== this.iipGridSize[zoom].y - 1) {
+				tile.style.height = this._getTileSize() + 'px';
+			}
+
+			tile.galleryimg = 'no';
 		}
 
 		tile.onselectstart = L.Util.falseFn;
@@ -400,6 +444,8 @@ L.TileLayer.IIP = L.TileLayer.extend({
 		if (L.Browser.android && !L.Browser.android23) {
 			tile.style.WebkitBackfaceVisibility = 'hidden';
 		}
+
+		return tile;
 	},
 
 // Ajax call to server
