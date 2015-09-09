@@ -145,7 +145,7 @@ L.TileLayer.IIP = L.TileLayer.extend({
 					options.minZoom = layer.iipMinZoom;
 				}
 				if (!options.maxZoom) {
-					options.maxZoom = layer.iipMaxZoom + 6;
+					options.maxZoom = layer.iipMaxZoom + 2;
 				}
 				options.maxNativeZoom = layer.iipMaxZoom;
 
@@ -275,9 +275,8 @@ L.TileLayer.IIP = L.TileLayer.extend({
 		zoom = map.getZoom();
 		if (zoom < this.iipMinZoom) {
 			map.setZoom(this.iipMinZoom);
-		} else if (zoom > this.iipMaxZoom) {
-			map.setZoom(this.iipMaxZoom);
 		}
+		
 		L.TileLayer.prototype.addTo.call(this, map);
 	},
 
